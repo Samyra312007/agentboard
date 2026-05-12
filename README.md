@@ -222,10 +222,6 @@ AgentBoard uses SQLite with better-sqlite3. The database file (`agentboard.db`) 
 - tool_name, input, output, error_message
 - latency_ms, tokens_used, created_at, completed_at
 
-## License
-
-ISC
-
 ## Acknowledgments
 
-Built for the Fellowship Demo. Inspired by the need for better AI agent observability tools.
+Build by ❤️ for the developer community.
