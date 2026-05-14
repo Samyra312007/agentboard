@@ -17,15 +17,30 @@ A real-time observability and debugging dashboard for AI agent runs. Watch your 
 - **Language**: TypeScript 5
 - **Styling**: Tailwind CSS 3
 - **Database**: SQLite (better-sqlite3)
-- **AI**: OpenAI SDK 4
-- **Streaming**: Server-Sent Events (SSE)
+- **AI**: OpenAI SDK 4 (Unified for all providers)
+- **Database**: SQLite (better-sqlite3)
+- **Providers**: OpenAI, Groq, NVIDIA Integrate
+
+## Supported Models
+
+AgentBoard supports multiple LLM providers with specialized handling for reasoning models:
+
+- **OpenAI**: `gpt-4o`, `gpt-4o-mini`
+- **Groq**: `llama-3.3-70b-versatile`
+- **NVIDIA Integrate**: 
+  - `bytedance/seed-oss-36b-instruct` (Reasoning/Thinking support)
+  - `mistralai/mistral-large-3-675b-instruct-2512`
+  - `minimaxai/minimax-m2.7`
+
+### Reasoning Content support
+For models that support "thinking" (like Seed OSS), AgentBoard captures and displays the `reasoning_content` deltas in real-time. Reasoning steps are highlighted within the trace to give you insight into the model's internal logic before it provides a final answer.
 
 ## Quick Start
 
 ### Prerequisites
 
 - Node.js 18+ installed
-- OpenAI API key
+- At least one API key from the supported providers
 
 ### Installation
 
@@ -44,9 +59,13 @@ npm install
 cp .env.local.example .env.local
 ```
 
-Edit `.env.local` and add your OpenAI API key:
-```
+4. Edit `.env.local` and add your API keys:
+```env
 OPENAI_API_KEY=your_openai_api_key_here
+BYTEDANCE_API_KEY=your_nvidia_key_here
+MISTRAL_API_KEY=your_nvidia_key_here
+MINIMAX_API_KEY=your_nvidia_key_here
+GROQAPI_KEY=your_groq_key_here
 ```
 
 4. Run the development server:

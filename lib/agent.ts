@@ -60,8 +60,6 @@ export class AgentRunner {
       const isNVIDIA = this.run.model.includes("minimax") || 
                       this.run.model.includes("mistral") || 
                       this.run.model.includes("seed-oss");
-      const isMinimax = this.run.model.includes("minimax");
-      const isMistral = this.run.model.includes("mistral");
       const isSeedOSS = this.run.model.includes("seed-oss");
 
       // Base system prompt
@@ -70,7 +68,7 @@ export class AgentRunner {
       const messages: any[] = [];
 
       if (isNVIDIA) {
-        // NVIDIA models strictly require prompt in 'user' role
+        // NVIDIA models strictly require prompt in 'user' role for many reasoning tasks
         messages.push({
           role: "user",
           content: `${systemPrompt}\n\nTask: ${this.run.task}`,
@@ -111,109 +109,44 @@ export class AgentRunner {
           let toolCalls: any[] = [];
           let finishReason = "stop";
 
-          if (isNVIDIA) {
-            // Strictly match the provided working scripts
-            let apiKey: string | undefined;
-            if (isMinimax) {
-              apiKey = process.env.MINIMAX_API_KEY;
-            } else if (isMistral) {
-              apiKey = process.env.MISTRAL_API_KEY;
-            } else if (isSeedOSS) {
-              apiKey = process.env.BYTEDANCE_API_KEY;
-            }
-            
-            const payload: any = {
-              model: this.run.model,
-              messages,
-              stream: true,
-              temperature: isSeedOSS ? 1.1 : (isMistral ? 0.15 : 1),
-              top_p: isSeedOSS ? 0.95 : (isMinimax ? 0.95 : (isMistral ? 1.00 : 1)),
-              max_tokens: isMistral ? 2048 : 8192,
-              frequency_penalty: isMistral ? 0.00 : undefined,
-              presence_penalty: isMistral ? 0.00 : undefined,
-            };
-
-            if (isSeedOSS) {
-              payload.extra_body = { thinking_budget: -1 };
-            }
-
-            // OMIT TOOLS for NVIDIA models for now to ensure connectivity works first
-            // Many reasoning models on NVIDIA Integrate do not support tool calling in thinking mode
-
-            const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${apiKey?.trim()}`,
+          // Use the OpenAI client for all models for robust stream handling
+          const stream = await this.client.chat.completions.create({
+            model: this.run.model,
+            messages: messages as any,
+            stream: true,
+            temperature: isSeedOSS ? 1.1 : (this.run.model.includes("mistral") ? 0.15 : 1),
+            max_tokens: this.run.model.includes("mistral") ? 2048 : (isSeedOSS ? 8192 : 4096),
+            // Tools are omitted for NVIDIA reasoning models for now to avoid complexity
+            tools: !isNVIDIA && tools.length > 0 ? tools.map(t => ({
+              type: "function",
+              function: {
+                name: t.name,
+                description: t.description,
+                parameters: t.parameters as any,
               },
-              body: JSON.stringify(payload),
-            });
+            })) : undefined,
+            tool_choice: !isNVIDIA ? "auto" : undefined,
+            // @ts-ignore - extra_body is supported by the SDK
+            extra_body: isSeedOSS ? { thinking_budget: -1 } : undefined,
+          } as any);
 
-            if (!response.ok) {
-              const errorText = await response.text();
-              throw new Error(`NVIDIA API Error: ${response.status} ${response.statusText} - ${errorText}`);
-            }
-
-            const reader = response.body?.getReader();
-            const decoder = new TextDecoder();
-            if (!reader) throw new Error("Failed to get stream reader");
-
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-
-              const chunk = decoder.decode(value);
-              const lines = chunk.split("\n").filter(l => l.trim() !== "");
-
-              for (const line of lines) {
-                if (line.startsWith("data: ")) {
-                  const dataStr = line.replace("data: ", "");
-                  if (dataStr === "[DONE]") break;
-                  
-                  try {
-                    const data = JSON.parse(dataStr);
-                    const delta = data.choices[0]?.delta;
-                    if (!delta) continue;
-
-                    if (delta.reasoning_content) fullReasoning += delta.reasoning_content;
-                    if (delta.content) fullContent += delta.content;
-                    
-                    if (data.choices[0].finish_reason) finishReason = data.choices[0].finish_reason;
-                  } catch (e) {}
+          for await (const chunk of stream) {
+            const delta = (chunk as any).choices[0]?.delta;
+            if (!delta) continue;
+            
+            if (delta.reasoning_content) fullReasoning += delta.reasoning_content;
+            if (delta.content) fullContent += delta.content;
+            
+            if (delta.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                if (!toolCalls[tc.index]) {
+                  toolCalls[tc.index] = { ...tc, function: { ...tc.function } };
+                } else {
+                  if (tc.function?.arguments) toolCalls[tc.index].function.arguments += tc.function.arguments;
                 }
               }
             }
-          } else {
-            const stream = await this.client.chat.completions.create({
-              model: this.run.model,
-              messages: messages as any,
-              stream: true,
-              tools: tools.length > 0 ? tools.map(t => ({
-                type: "function",
-                function: {
-                  name: t.name,
-                  description: t.description,
-                  parameters: t.parameters as any,
-                },
-              })) : undefined,
-              tool_choice: "auto",
-            });
-
-            for await (const chunk of stream) {
-              const delta = chunk.choices[0]?.delta;
-              if (!delta) continue;
-              if (delta.content) fullContent += delta.content;
-              if (delta.tool_calls) {
-                for (const tc of delta.tool_calls) {
-                  if (!toolCalls[tc.index]) {
-                    toolCalls[tc.index] = { ...tc, function: { ...tc.function } };
-                  } else {
-                    if (tc.function?.arguments) toolCalls[tc.index].function.arguments += tc.function.arguments;
-                  }
-                }
-              }
-              if (chunk.choices[0].finish_reason) finishReason = chunk.choices[0].finish_reason;
-            }
+            if ((chunk as any).choices[0].finish_reason) finishReason = (chunk as any).choices[0].finish_reason;
           }
 
           const llmLatency = Date.now() - llmStepStart;
