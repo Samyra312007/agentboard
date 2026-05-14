@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
     const run = await createRun({
       id: uuidv4(),
       task: body.task,
-      model: body.model || "llama-3.1-70b-versatile",
+      model: body.model || "llama-3.3-70b-versatile",
       max_steps: body.maxSteps || 10,
       final_output: null,
       error_message: null,

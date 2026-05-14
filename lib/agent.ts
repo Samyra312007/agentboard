@@ -3,10 +3,33 @@ import { v4 as uuidv4 } from "uuid";
 import type { Run, Step, Tool, SSEEvent, RunSummary } from "@/types";
 import { tools, getToolByName } from "./tools";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || process.env.GROQAPI_KEY,
-  baseURL: process.env.OPENAI_API_KEY ? undefined : "https://api.groq.com/openai/v1",
-});
+function getClientForModel(model: string): OpenAI {
+  if (model.includes("glm") || model.includes("minimax") || model.includes("mistral")) {
+    let apiKey: string | undefined;
+    if (model.includes("glm")) {
+      apiKey = process.env.GLM_API_KEY;
+    } else if (model.includes("minimax")) {
+      apiKey = process.env.MINIMAX_API_KEY;
+    } else if (model.includes("mistral")) {
+      apiKey = process.env.MISTRAL_API_KEY;
+    }
+    return new OpenAI({
+      apiKey: apiKey?.trim() || "missing_key",
+      baseURL: "https://integrate.api.nvidia.com/v1",
+    });
+  }
+
+  if (process.env.OPENAI_API_KEY) {
+    return new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY.trim(),
+    });
+  }
+
+  return new OpenAI({
+    apiKey: (process.env.GROQAPI_KEY || "").trim(),
+    baseURL: "https://api.groq.com/openai/v1",
+  });
+}
 
 export interface TraceEmitter {
   emit(event: SSEEvent): Promise<void> | void;
@@ -19,6 +42,7 @@ export class AgentRunner {
   private totalTokens: number;
   private totalLatency: number;
   private failureCount: number;
+  private client: OpenAI;
 
   constructor(run: Run, emitter: TraceEmitter) {
     this.run = run;
@@ -27,25 +51,36 @@ export class AgentRunner {
     this.totalTokens = 0;
     this.totalLatency = 0;
     this.failureCount = 0;
+    this.client = getClientForModel(run.model);
   }
 
   async execute(): Promise<void> {
     try {
-      const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        {
-          role: "system",
-          content: `You are a helpful AI assistant with access to tools. Use the provided tools to answer the user's request efficiently. Provide a clear final answer once you have gathered all necessary information.`,
-        },
-        {
+      // Robust detection of NVIDIA hosted models
+      const isNVIDIA = this.run.model.includes("minimax") || this.run.model.includes("glm") || this.run.model.includes("mistral");
+      const isGLM = this.run.model.includes("glm");
+      const isMinimax = this.run.model.includes("minimax");
+      const isMistral = this.run.model.includes("mistral");
+
+      // Base system prompt
+      const systemPrompt = `You are a helpful AI assistant. Use the provided tools to answer the user's request if needed. Provide a clear final answer once you have gathered all necessary information.`;
+
+      const messages: any[] = [];
+
+      if (isNVIDIA) {
+        // NVIDIA models strictly require prompt in 'user' role
+        messages.push({
           role: "user",
-          content: this.run.task,
-        },
-      ];
+          content: `${systemPrompt}\n\nTask: ${this.run.task}`,
+        });
+      } else {
+        messages.push({ role: "system", content: systemPrompt });
+        messages.push({ role: "user", content: this.run.task });
+      }
 
       while (this.stepNumber < this.run.max_steps) {
         this.stepNumber++;
 
-        // LLM Call step
         const llmStepId = uuidv4();
         const llmStepStart = Date.now();
 
@@ -69,24 +104,123 @@ export class AgentRunner {
         });
 
         try {
-          const response = await openai.chat.completions.create({
-            model: this.run.model,
-            messages,
-            tools: tools.length > 0 ? tools.map(t => ({
-              type: "function" as const,
-              function: {
-                name: t.name,
-                description: t.description,
-                parameters: t.parameters as any,
+          let fullContent = "";
+          let fullReasoning = "";
+          let toolCalls: any[] = [];
+          let finishReason = "stop";
+
+          if (isNVIDIA) {
+            // Strictly match the provided working scripts
+            let apiKey: string | undefined;
+            if (isGLM) {
+              apiKey = process.env.GLM_API_KEY;
+            } else if (isMinimax) {
+              apiKey = process.env.MINIMAX_API_KEY;
+            } else if (isMistral) {
+              apiKey = process.env.MISTRAL_API_KEY;
+            }
+            
+            const payload: any = {
+              model: this.run.model,
+              messages,
+              stream: true,
+              temperature: isMistral ? 0.15 : 1,
+              top_p: isMinimax ? 0.95 : (isMistral ? 1.00 : 1),
+              max_tokens: isGLM ? 16384 : (isMistral ? 2048 : 8192),
+              frequency_penalty: isMistral ? 0.00 : undefined,
+              presence_penalty: isMistral ? 0.00 : undefined,
+            };
+
+            if (isGLM) {
+              payload.chat_template_kwargs = { "enable_thinking": true, "clear_thinking": false };
+            }
+
+            // OMIT TOOLS for NVIDIA models for now to ensure connectivity works first
+            // Many reasoning models on NVIDIA Integrate do not support tool calling in thinking mode
+
+            const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${apiKey?.trim()}`,
               },
-            })) : undefined,
-            tool_choice: "auto",
-          });
+              body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              throw new Error(`NVIDIA API Error: ${response.status} ${response.statusText} - ${errorText}`);
+            }
+
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+            if (!reader) throw new Error("Failed to get stream reader");
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              const chunk = decoder.decode(value);
+              const lines = chunk.split("\n").filter(l => l.trim() !== "");
+
+              for (const line of lines) {
+                if (line.startsWith("data: ")) {
+                  const dataStr = line.replace("data: ", "");
+                  if (dataStr === "[DONE]") break;
+                  
+                  try {
+                    const data = JSON.parse(dataStr);
+                    const delta = data.choices[0]?.delta;
+                    if (!delta) continue;
+
+                    if (delta.reasoning_content) fullReasoning += delta.reasoning_content;
+                    if (delta.content) fullContent += delta.content;
+                    
+                    if (data.choices[0].finish_reason) finishReason = data.choices[0].finish_reason;
+                  } catch (e) {}
+                }
+              }
+            }
+          } else {
+            const stream = await this.client.chat.completions.create({
+              model: this.run.model,
+              messages: messages as any,
+              stream: true,
+              tools: tools.length > 0 ? tools.map(t => ({
+                type: "function",
+                function: {
+                  name: t.name,
+                  description: t.description,
+                  parameters: t.parameters as any,
+                },
+              })) : undefined,
+              tool_choice: "auto",
+            });
+
+            for await (const chunk of stream) {
+              const delta = chunk.choices[0]?.delta;
+              if (!delta) continue;
+              if (delta.content) fullContent += delta.content;
+              if (delta.tool_calls) {
+                for (const tc of delta.tool_calls) {
+                  if (!toolCalls[tc.index]) {
+                    toolCalls[tc.index] = { ...tc, function: { ...tc.function } };
+                  } else {
+                    if (tc.function?.arguments) toolCalls[tc.index].function.arguments += tc.function.arguments;
+                  }
+                }
+              }
+              if (chunk.choices[0].finish_reason) finishReason = chunk.choices[0].finish_reason;
+            }
+          }
 
           const llmLatency = Date.now() - llmStepStart;
-          const tokensUsed = response.usage?.total_tokens || 0;
-          this.totalTokens += tokensUsed;
           this.totalLatency += llmLatency;
+
+          let displayOutput = fullContent;
+          if (fullReasoning) {
+            displayOutput = `> Reasoning: ${fullReasoning}\n\n${fullContent}`;
+          }
 
           await this.emitter.emit({
             type: "step",
@@ -98,34 +232,37 @@ export class AgentRunner {
               status: "success",
               tool_name: null,
               input: JSON.stringify({ messages_count: messages.length }),
-              output: JSON.stringify({ model: this.run.model, finish_reason: response.choices[0].finish_reason }),
+              output: JSON.stringify({ 
+                model: this.run.model, 
+                finish_reason: finishReason,
+                content: displayOutput
+              }),
               error_message: null,
               latency_ms: llmLatency,
-              tokens_used: tokensUsed,
+              tokens_used: 0,
               created_at: new Date(llmStepStart).toISOString(),
               completed_at: new Date().toISOString(),
             },
           });
 
-          const message = response.choices[0].message;
-          messages.push(message);
+          const assistantMessage: any = { role: "assistant", content: fullContent };
+          if (toolCalls.length > 0) {
+            assistantMessage.tool_calls = toolCalls.filter(tc => tc.function?.name);
+          }
+          messages.push(assistantMessage);
 
-          // Check if tool call
-          if (message.tool_calls && message.tool_calls.length > 0) {
-            for (const toolCall of message.tool_calls) {
-              if (toolCall.type !== 'function') continue;
-
+          if (toolCalls.length > 0 && assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
+            // ... (Tool calling logic remains the same)
+            // Note: Currently toolCalls will only be populated in non-NVIDIA path
+            for (const toolCall of assistantMessage.tool_calls) {
               this.stepNumber++;
-
               const toolStepId = uuidv4();
               const toolStepStart = Date.now();
               const toolName = toolCall.function.name;
-              const toolArgs = JSON.parse(toolCall.function.arguments);
-
+              const toolArgs = JSON.parse(toolCall.function.arguments || "{}");
               const tool = getToolByName(toolName);
-              if (!tool) {
-                throw new Error(`Unknown tool: ${toolName}`);
-              }
+
+              if (!tool) throw new Error(`Unknown tool: ${toolName}`);
 
               await this.emitter.emit({
                 type: "step",
@@ -148,9 +285,7 @@ export class AgentRunner {
 
               try {
                 const result = await tool.execute(toolArgs);
-                const toolLatency = result.latency_ms;
-                this.totalLatency += toolLatency;
-
+                this.totalLatency += result.latency_ms;
                 await this.emitter.emit({
                   type: "step",
                   data: {
@@ -163,27 +298,22 @@ export class AgentRunner {
                     input: JSON.stringify(toolArgs),
                     output: JSON.stringify(result.output),
                     error_message: result.error || null,
-                    latency_ms: toolLatency,
+                    latency_ms: result.latency_ms,
                     tokens_used: null,
                     created_at: new Date(toolStepStart).toISOString(),
                     completed_at: new Date().toISOString(),
                   },
                 });
 
-                if (!result.success) {
-                  this.failureCount++;
-                }
-
-                messages.push({
-                  role: "tool",
-                  tool_call_id: toolCall.id,
-                  content: JSON.stringify(result.output),
+                if (!result.success) this.failureCount++;
+                messages.push({ 
+                  role: "tool", 
+                  tool_call_id: toolCall.id, 
+                  name: toolName,
+                  content: JSON.stringify(result.output) 
                 });
               } catch (error) {
-                const toolLatency = Date.now() - toolStepStart;
-                this.totalLatency += toolLatency;
                 this.failureCount++;
-
                 await this.emitter.emit({
                   type: "step",
                   data: {
@@ -196,26 +326,24 @@ export class AgentRunner {
                     input: JSON.stringify(toolArgs),
                     output: null,
                     error_message: error instanceof Error ? error.message : "Unknown error",
-                    latency_ms: toolLatency,
+                    latency_ms: Date.now() - toolStepStart,
                     tokens_used: null,
                     created_at: new Date(toolStepStart).toISOString(),
                     completed_at: new Date().toISOString(),
                   },
                 });
-
-                messages.push({
-                  role: "tool",
-                  tool_call_id: toolCall.id,
-                  content: JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
+                messages.push({ 
+                  role: "tool", 
+                  tool_call_id: toolCall.id, 
+                  name: toolName,
+                  content: JSON.stringify({ error: "Tool execution failed" }) 
                 });
               }
             }
-          } else if (message.content) {
+          } else if (fullContent || fullReasoning) {
             // Final answer
             this.stepNumber++;
             const finalStepId = uuidv4();
-            const finalStepStart = Date.now();
-
             await this.emitter.emit({
               type: "step",
               data: {
@@ -226,7 +354,7 @@ export class AgentRunner {
                 status: "success",
                 tool_name: null,
                 input: JSON.stringify({}),
-                output: JSON.stringify({ answer: message.content }),
+                output: JSON.stringify({ answer: displayOutput }),
                 error_message: null,
                 latency_ms: 0,
                 tokens_used: 0,
@@ -235,117 +363,23 @@ export class AgentRunner {
               },
             });
 
-            // Emit completion
-            const summary: RunSummary = {
-              run_id: this.run.id,
-              status: "completed",
-              total_steps: this.stepNumber,
-              total_tokens: this.totalTokens,
-              total_latency_ms: this.totalLatency,
-              failure_count: this.failureCount,
-              final_output: message.content,
-            };
-
             await this.emitter.emit({
               type: "complete",
-              data: summary,
+              data: {
+                run_id: this.run.id,
+                status: "completed",
+                total_steps: this.stepNumber,
+                total_tokens: this.totalTokens,
+                total_latency_ms: this.totalLatency,
+                failure_count: this.failureCount,
+                final_output: displayOutput,
+              },
             });
-
             return;
           }
         } catch (error) {
-          const llmLatency = Date.now() - llmStepStart;
-          this.failureCount++;
-
           const errorMessage = error instanceof Error ? error.message : "Unknown error";
           console.error("LLM call failed:", errorMessage);
-
-          // Check if this is a function calling error
-          if (errorMessage.includes("function calling") || errorMessage.includes("tool") || errorMessage.includes("400")) {
-            // If function calling fails, try without tools
-            try {
-              console.log("Retrying without function calling...");
-              const simpleResponse = await openai.chat.completions.create({
-                model: this.run.model,
-                messages,
-                tools: undefined,
-                tool_choice: "none",
-              });
-
-              const simpleLatency = Date.now() - llmStepStart;
-              const tokensUsed = simpleResponse.usage?.total_tokens || 0;
-              this.totalTokens += tokensUsed;
-              this.totalLatency += simpleLatency;
-
-              await this.emitter.emit({
-                type: "step",
-                data: {
-                  id: llmStepId,
-                  run_id: this.run.id,
-                  step_number: this.stepNumber,
-                  type: "llm_call",
-                  status: "success",
-                  tool_name: null,
-                  input: JSON.stringify({ messages_count: messages.length, note: "Function calling disabled" }),
-                  output: JSON.stringify({ model: this.run.model, finish_reason: simpleResponse.choices[0].finish_reason }),
-                  error_message: null,
-                  latency_ms: simpleLatency,
-                  tokens_used: tokensUsed,
-                  created_at: new Date(llmStepStart).toISOString(),
-                  completed_at: new Date().toISOString(),
-                },
-              });
-
-              const message = simpleResponse.choices[0].message;
-              messages.push(message);
-
-              // If we get a response without tools, treat it as final answer
-              if (message.content) {
-                this.stepNumber++;
-                const finalStepId = uuidv4();
-                const finalStepStart = Date.now();
-
-                await this.emitter.emit({
-                  type: "step",
-                  data: {
-                    id: finalStepId,
-                    run_id: this.run.id,
-                    step_number: this.stepNumber,
-                    type: "final_answer",
-                    status: "success",
-                    tool_name: null,
-                    input: JSON.stringify({}),
-                    output: JSON.stringify({ answer: message.content, note: "Direct response (function calling unavailable)" }),
-                    error_message: null,
-                    latency_ms: 0,
-                    tokens_used: 0,
-                    created_at: new Date().toISOString(),
-                    completed_at: new Date().toISOString(),
-                  },
-                });
-
-                const summary: RunSummary = {
-                  run_id: this.run.id,
-                  status: "completed",
-                  total_steps: this.stepNumber,
-                  total_tokens: this.totalTokens,
-                  total_latency_ms: this.totalLatency,
-                  failure_count: this.failureCount,
-                  final_output: message.content,
-                };
-
-                await this.emitter.emit({
-                  type: "complete",
-                  data: summary,
-                });
-
-                return;
-              }
-            } catch (retryError) {
-              // Retry also failed, use original error
-              console.error("Retry without function calling also failed:", retryError);
-            }
-          }
 
           await this.emitter.emit({
             type: "step",
@@ -358,8 +392,8 @@ export class AgentRunner {
               tool_name: null,
               input: JSON.stringify({ messages_count: messages.length }),
               output: null,
-              error_message: errorMessage,
-              latency_ms: llmLatency,
+              error_message: `Provider Error: ${errorMessage}`,
+              latency_ms: Date.now() - llmStepStart,
               tokens_used: null,
               created_at: new Date(llmStepStart).toISOString(),
               completed_at: new Date().toISOString(),
@@ -368,31 +402,11 @@ export class AgentRunner {
 
           await this.emitter.emit({
             type: "error",
-            data: {
-              run_id: this.run.id,
-              error: errorMessage,
-            },
+            data: { run_id: this.run.id, error: errorMessage },
           });
-
           return;
         }
       }
-
-      // Max steps reached
-      const summary: RunSummary = {
-        run_id: this.run.id,
-        status: "completed",
-        total_steps: this.stepNumber,
-        total_tokens: this.totalTokens,
-        total_latency_ms: this.totalLatency,
-        failure_count: this.failureCount,
-        final_output: "Max steps reached",
-      };
-
-      await this.emitter.emit({
-        type: "complete",
-        data: summary,
-      });
     } catch (error) {
       await this.emitter.emit({
         type: "error",
