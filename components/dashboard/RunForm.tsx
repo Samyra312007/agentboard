@@ -54,6 +54,7 @@ export function RunForm({ onSubmit, isRunning }: RunFormProps) {
                 <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
                 <option value="minimaxai/minimax-m2.7">minimax-m2.7 (NVIDIA)</option>
                 <option value="mistralai/mistral-large-3-675b-instruct-2512">Mistral Large 3 (NVIDIA)</option>
+                <option value="bytedance/seed-oss-36b-instruct">Seed OSS 36B (NVIDIA)</option>
               </select>
             </div>
 

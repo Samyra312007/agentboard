@@ -4,14 +4,14 @@ import type { Run, Step, Tool, SSEEvent, RunSummary } from "@/types";
 import { tools, getToolByName } from "./tools";
 
 function getClientForModel(model: string): OpenAI {
-  if (model.includes("glm") || model.includes("minimax") || model.includes("mistral")) {
+  if (model.includes("minimax") || model.includes("mistral") || model.includes("seed-oss")) {
     let apiKey: string | undefined;
-    if (model.includes("glm")) {
-      apiKey = process.env.GLM_API_KEY;
-    } else if (model.includes("minimax")) {
+    if (model.includes("minimax")) {
       apiKey = process.env.MINIMAX_API_KEY;
     } else if (model.includes("mistral")) {
       apiKey = process.env.MISTRAL_API_KEY;
+    } else if (model.includes("seed-oss")) {
+      apiKey = process.env.BYTEDANCE_API_KEY;
     }
     return new OpenAI({
       apiKey: apiKey?.trim() || "missing_key",
@@ -57,10 +57,12 @@ export class AgentRunner {
   async execute(): Promise<void> {
     try {
       // Robust detection of NVIDIA hosted models
-      const isNVIDIA = this.run.model.includes("minimax") || this.run.model.includes("glm") || this.run.model.includes("mistral");
-      const isGLM = this.run.model.includes("glm");
+      const isNVIDIA = this.run.model.includes("minimax") || 
+                      this.run.model.includes("mistral") || 
+                      this.run.model.includes("seed-oss");
       const isMinimax = this.run.model.includes("minimax");
       const isMistral = this.run.model.includes("mistral");
+      const isSeedOSS = this.run.model.includes("seed-oss");
 
       // Base system prompt
       const systemPrompt = `You are a helpful AI assistant. Use the provided tools to answer the user's request if needed. Provide a clear final answer once you have gathered all necessary information.`;
@@ -112,27 +114,27 @@ export class AgentRunner {
           if (isNVIDIA) {
             // Strictly match the provided working scripts
             let apiKey: string | undefined;
-            if (isGLM) {
-              apiKey = process.env.GLM_API_KEY;
-            } else if (isMinimax) {
+            if (isMinimax) {
               apiKey = process.env.MINIMAX_API_KEY;
             } else if (isMistral) {
               apiKey = process.env.MISTRAL_API_KEY;
+            } else if (isSeedOSS) {
+              apiKey = process.env.BYTEDANCE_API_KEY;
             }
             
             const payload: any = {
               model: this.run.model,
               messages,
               stream: true,
-              temperature: isMistral ? 0.15 : 1,
-              top_p: isMinimax ? 0.95 : (isMistral ? 1.00 : 1),
-              max_tokens: isGLM ? 16384 : (isMistral ? 2048 : 8192),
+              temperature: isSeedOSS ? 1.1 : (isMistral ? 0.15 : 1),
+              top_p: isSeedOSS ? 0.95 : (isMinimax ? 0.95 : (isMistral ? 1.00 : 1)),
+              max_tokens: isMistral ? 2048 : 8192,
               frequency_penalty: isMistral ? 0.00 : undefined,
               presence_penalty: isMistral ? 0.00 : undefined,
             };
 
-            if (isGLM) {
-              payload.chat_template_kwargs = { "enable_thinking": true, "clear_thinking": false };
+            if (isSeedOSS) {
+              payload.extra_body = { thinking_budget: -1 };
             }
 
             // OMIT TOOLS for NVIDIA models for now to ensure connectivity works first
