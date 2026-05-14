@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     return new Response("Missing run_id parameter", { status: 400 });
   }
 
-  const run = getRunById(runId);
+  const run = await getRunById(runId);
   if (!run) {
     return new Response("Run not found", { status: 404 });
   }
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         // Send existing steps
-        const steps = getStepsByRunId(runId);
+        const steps = await getStepsByRunId(runId);
         for (const step of steps) {
           const data = `event: step\ndata: ${JSON.stringify(step)}\n\n`;
           controller.enqueue(encoder.encode(data));
@@ -59,29 +59,16 @@ export async function GET(request: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       const emitter: TraceEmitter = {
-        emit: (event: SSEEvent) => {
-          const data = `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
-          controller.enqueue(encoder.encode(data));
-        },
-      };
-
-      // Update run status to running if it's not already
-      if (run.status !== "running") {
-        updateRun(runId, { status: "running" });
-      }
-
-      try {
-        // Save each step to database as it's emitted
-        const originalEmit = emitter.emit.bind(emitter);
-        emitter.emit = (event: SSEEvent) => {
+        emit: async (event: SSEEvent) => {
+          // Save each step to database as it's emitted
           if (event.type === "step") {
             const step = event.data as Step;
             if (step.status === "running") {
               // Create new step
-              createStep(step);
+              await createStep(step);
             } else {
               // Update existing step
-              updateStep(step.id, {
+              await updateStep(step.id, {
                 status: step.status,
                 output: step.output,
                 error_message: step.error_message,
@@ -93,9 +80,9 @@ export async function GET(request: NextRequest) {
 
             // Update run totals
             if (step.status === "success" || step.status === "error") {
-              const currentRun = getRunById(runId);
+              const currentRun = await getRunById(runId);
               if (currentRun) {
-                updateRun(runId, {
+                await updateRun(runId, {
                   total_steps: currentRun.total_steps + 1,
                   total_tokens: currentRun.total_tokens + (step.tokens_used || 0),
                   total_latency_ms: currentRun.total_latency_ms + (step.latency_ms || 0),
@@ -105,7 +92,7 @@ export async function GET(request: NextRequest) {
             }
           } else if (event.type === "complete") {
             const summary = event.data as RunSummary;
-            updateRun(runId, {
+            await updateRun(runId, {
               status: summary.status,
               total_steps: summary.total_steps,
               total_tokens: summary.total_tokens,
@@ -116,16 +103,24 @@ export async function GET(request: NextRequest) {
             });
           } else if (event.type === "error") {
             const errorPayload = event.data as ErrorPayload;
-            updateRun(runId, {
+            await updateRun(runId, {
               status: "failed",
               error_message: errorPayload.error,
               completed_at: new Date().toISOString(),
             });
           }
 
-          originalEmit(event);
-        };
+          const data = `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
+          controller.enqueue(encoder.encode(data));
+        },
+      };
 
+      // Update run status to running if it's not already
+      if (run.status !== "running") {
+        await updateRun(runId, { status: "running" });
+      }
+
+      try {
         // Run the agent
         const runner = new AgentRunner(run, emitter);
         await runner.execute();
@@ -134,7 +129,7 @@ export async function GET(request: NextRequest) {
         controller.close();
       } catch (error) {
         console.error("Error in stream:", error);
-        updateRun(runId, {
+        await updateRun(runId, {
           status: "failed",
           error_message: error instanceof Error ? error.message : "Unknown error",
           completed_at: new Date().toISOString(),

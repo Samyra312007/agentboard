@@ -8,14 +8,14 @@ export async function GET(request: NextRequest) {
 
     if (id) {
       // Get single run with steps
-      const run = getRunWithSteps(id);
+      const run = await getRunWithSteps(id);
       if (!run) {
         return NextResponse.json({ error: "Run not found" }, { status: 404 });
       }
       return NextResponse.json(run);
     } else {
       // Get all runs
-      const runs = getAllRuns();
+      const runs = await getAllRuns();
       return NextResponse.json({ runs });
     }
   } catch (error) {

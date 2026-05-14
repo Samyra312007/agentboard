@@ -12,10 +12,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@supabase/supabase-js": "^2.105.4",
     "@types/node": "^25.7.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "better-sqlite3": "^12.10.0",
     "clsx": "^2.1.1",
     "lucide-react": "^1.14.0",
     "next": "^16.2.6",
@@ -27,7 +27,6 @@
     "uuid": "^14.0.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/uuid": "^10.0.0",
     "autoprefixer": "^10.5.0",
     "postcss": "^8.5.14",

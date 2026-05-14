@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const run = createRun({
+    const run = await createRun({
       id: uuidv4(),
       task: body.task,
       model: body.model || "llama-3.1-70b-versatile",

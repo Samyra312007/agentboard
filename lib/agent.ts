@@ -9,7 +9,7 @@ const openai = new OpenAI({
 });
 
 export interface TraceEmitter {
-  emit(event: SSEEvent): void;
+  emit(event: SSEEvent): Promise<void> | void;
 }
 
 export class AgentRunner {
@@ -49,7 +49,7 @@ export class AgentRunner {
         const llmStepId = uuidv4();
         const llmStepStart = Date.now();
 
-        this.emitter.emit({
+        await this.emitter.emit({
           type: "step",
           data: {
             id: llmStepId,
@@ -88,7 +88,7 @@ export class AgentRunner {
           this.totalTokens += tokensUsed;
           this.totalLatency += llmLatency;
 
-          this.emitter.emit({
+          await this.emitter.emit({
             type: "step",
             data: {
               id: llmStepId,
@@ -127,7 +127,7 @@ export class AgentRunner {
                 throw new Error(`Unknown tool: ${toolName}`);
               }
 
-              this.emitter.emit({
+              await this.emitter.emit({
                 type: "step",
                 data: {
                   id: toolStepId,
@@ -151,7 +151,7 @@ export class AgentRunner {
                 const toolLatency = result.latency_ms;
                 this.totalLatency += toolLatency;
 
-                this.emitter.emit({
+                await this.emitter.emit({
                   type: "step",
                   data: {
                     id: toolStepId,
@@ -184,7 +184,7 @@ export class AgentRunner {
                 this.totalLatency += toolLatency;
                 this.failureCount++;
 
-                this.emitter.emit({
+                await this.emitter.emit({
                   type: "step",
                   data: {
                     id: toolStepId,
@@ -216,7 +216,7 @@ export class AgentRunner {
             const finalStepId = uuidv4();
             const finalStepStart = Date.now();
 
-            this.emitter.emit({
+            await this.emitter.emit({
               type: "step",
               data: {
                 id: finalStepId,
@@ -246,7 +246,7 @@ export class AgentRunner {
               final_output: message.content,
             };
 
-            this.emitter.emit({
+            await this.emitter.emit({
               type: "complete",
               data: summary,
             });
@@ -277,7 +277,7 @@ export class AgentRunner {
               this.totalTokens += tokensUsed;
               this.totalLatency += simpleLatency;
 
-              this.emitter.emit({
+              await this.emitter.emit({
                 type: "step",
                 data: {
                   id: llmStepId,
@@ -305,7 +305,7 @@ export class AgentRunner {
                 const finalStepId = uuidv4();
                 const finalStepStart = Date.now();
 
-                this.emitter.emit({
+                await this.emitter.emit({
                   type: "step",
                   data: {
                     id: finalStepId,
@@ -334,7 +334,7 @@ export class AgentRunner {
                   final_output: message.content,
                 };
 
-                this.emitter.emit({
+                await this.emitter.emit({
                   type: "complete",
                   data: summary,
                 });
@@ -347,7 +347,7 @@ export class AgentRunner {
             }
           }
 
-          this.emitter.emit({
+          await this.emitter.emit({
             type: "step",
             data: {
               id: llmStepId,
@@ -366,7 +366,7 @@ export class AgentRunner {
             },
           });
 
-          this.emitter.emit({
+          await this.emitter.emit({
             type: "error",
             data: {
               run_id: this.run.id,
@@ -389,12 +389,12 @@ export class AgentRunner {
         final_output: "Max steps reached",
       };
 
-      this.emitter.emit({
+      await this.emitter.emit({
         type: "complete",
         data: summary,
       });
     } catch (error) {
-      this.emitter.emit({
+      await this.emitter.emit({
         type: "error",
         data: {
           run_id: this.run.id,
