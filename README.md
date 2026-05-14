@@ -16,9 +16,8 @@ A real-time observability and debugging dashboard for AI agent runs. Watch your 
 - **Framework**: Next.js 16 with App Router
 - **Language**: TypeScript 5
 - **Styling**: Tailwind CSS 3
-- **Database**: SQLite (better-sqlite3)
+- **Database**: Supabase (PostgreSQL)
 - **AI**: OpenAI SDK 4 (Unified for all providers)
-- **Database**: SQLite (better-sqlite3)
 - **Providers**: OpenAI, Groq, NVIDIA Integrate
 
 ## Supported Models
@@ -40,6 +39,7 @@ For models that support "thinking" (like Seed OSS), AgentBoard captures and disp
 ### Prerequisites
 
 - Node.js 18+ installed
+- A Supabase project
 - At least one API key from the supported providers
 
 ### Installation
@@ -59,21 +59,68 @@ npm install
 cp .env.local.example .env.local
 ```
 
-4. Edit `.env.local` and add your API keys:
+4. Edit `.env.local` and add your keys:
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
-BYTEDANCE_API_KEY=your_nvidia_key_here
-MISTRAL_API_KEY=your_nvidia_key_here
-MINIMAX_API_KEY=your_nvidia_key_here
-GROQAPI_KEY=your_groq_key_here
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 ```
 
-4. Run the development server:
+### Database Setup
+
+Run the following SQL in your Supabase SQL Editor to create the necessary tables:
+
+```sql
+-- Create runs table
+CREATE TABLE runs (
+  id UUID PRIMARY KEY,
+  task TEXT NOT NULL,
+  model TEXT NOT NULL,
+  max_steps INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  total_steps INTEGER DEFAULT 0,
+  total_tokens INTEGER DEFAULT 0,
+  total_latency_ms INTEGER DEFAULT 0,
+  failure_count INTEGER DEFAULT 0,
+  final_output TEXT,
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+
+-- Create steps table
+CREATE TABLE steps (
+  id UUID PRIMARY KEY,
+  run_id UUID REFERENCES runs(id) ON DELETE CASCADE,
+  step_number INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  tool_name TEXT,
+  input TEXT,
+  output TEXT,
+  error_message TEXT,
+  latency_ms INTEGER,
+  tokens_used INTEGER,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+
+-- Enable RLS (Optional, but recommended)
+ALTER TABLE runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE steps ENABLE ROW LEVEL SECURITY;
+
+-- Simple policy to allow all access for now (Adjust for production)
+CREATE POLICY "Allow all access" ON runs FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all access" ON steps FOR ALL USING (true) WITH CHECK (true);
+```
+
+5. Run the development server:
 ```bash
 npm run dev
 ```
 
-5. Open [http://localhost:3000](http://localhost:3000) in your browser
+6. Open [http://localhost:3000](http://localhost:3000) in your browser
 
 ## Architecture
 
@@ -104,8 +151,8 @@ npm run dev
 ┌─────────────────┐             ┌──────────────────────┐
 │   lib/agent.ts  │             │     lib/db.ts         │
 │                 │             │                        │
-│  AgentRunner    │             │  SQLite via            │
-│  TraceEmitter   │             │  better-sqlite3        │
+│  AgentRunner    │             │  Supabase (PostgreSQL) │
+│  TraceEmitter   │             │                        │
 │  Tool registry  │             │  runs table            │
 │  OpenAI calls   │             │  steps table           │
 └────────┬────────┘             └──────────────────────┘
@@ -195,7 +242,7 @@ agent-board/
 ├── lib/
 │   ├── agent.ts                   # AgentRunner + TraceEmitter
 │   ├── tools.ts                   # Tool implementations
-│   ├── db.ts                      # SQLite database layer
+│   ├── db.ts                      # Supabase database layer
 │   └── utils.ts                   # Utility functions
 ├── types/
 │   └── index.ts                   # TypeScript interfaces
@@ -208,6 +255,9 @@ agent-board/
 ## Environment Variables
 
 - `OPENAI_API_KEY`: Your OpenAI API key (required)
+- `NEXT_PUBLIC_SUPABASE_URL`: Supabase Project URL
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase Anon Key
+- `SUPABASE_SERVICE_ROLE_KEY`: Supabase Service Role Key
 
 ## Development
 
@@ -227,7 +277,7 @@ npm run lint
 
 ## Database
 
-AgentBoard uses SQLite with better-sqlite3. The database file (`agentboard.db`) is created automatically on first run and is gitignored.
+AgentBoard uses Supabase (PostgreSQL) for persistence.
 
 ### Schema
 

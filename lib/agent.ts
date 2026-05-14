@@ -110,7 +110,7 @@ export class AgentRunner {
           let finishReason = "stop";
 
           // Use the OpenAI client for all models for robust stream handling
-          const stream = await this.client.chat.completions.create({
+          const stream: any = await this.client.chat.completions.create({
             model: this.run.model,
             messages: messages as any,
             stream: true,
