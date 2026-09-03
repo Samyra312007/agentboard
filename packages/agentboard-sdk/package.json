@@ -1,0 +1,20 @@
+{
+  "name": "agentboard-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for reporting AI agent traces to AgentBoard",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "keywords": [
+    "agent",
+    "observability",
+    "traces",
+    "llm"
+  ],
+  "license": "MIT"
+}

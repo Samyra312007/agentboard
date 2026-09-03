@@ -266,6 +266,30 @@ agent-board/
 └── package.json                  # Dependencies
 ```
 
+## Public Ingestion API
+
+External agents can report traces to AgentBoard without a browser session.
+Create an API key in **Settings**, then authenticate with
+`Authorization: Bearer <key>`:
+
+- `POST /api/v1/runs` — create a run `{ task, model?, metadata? }` → `{ run_id }`
+- `POST /api/v1/runs/:id/steps` — report a step
+  `{ id?, step_number, type, status?, tool_name?, input?, output?,
+  error_message?, latency_ms?, tokens_used?, created_at? }`
+- `PATCH /api/v1/runs/:id` — complete/fail a run `{ status, final_output?, error_message? }`
+
+See `openapi.yaml` for the full spec, and `packages/agentboard-sdk` for the
+TypeScript SDK (buffered reporting with auto-flush):
+
+```ts
+import { AgentBoardClient } from "agentboard-sdk";
+
+const client = new AgentBoardClient({ apiKey: "ab_live_..." });
+const run = await client.startRun({ task: "Watch my agent" });
+run.trackStep({ step_number: 1, type: "llm_call", status: "success" });
+await run.end({ status: "completed" });
+```
+
 ## Development
 
 ```bash

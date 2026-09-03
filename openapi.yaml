@@ -1,0 +1,180 @@
+openapi: 3.0.3
+info:
+  title: AgentBoard Ingestion API
+  description: Report AI agent traces to AgentBoard. Authenticate with an API key from Settings.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000
+security:
+  - bearerAuth: []
+tags:
+  - name: runs
+  - name: steps
+paths:
+  /api/v1/runs:
+    post:
+      tags: [runs]
+      summary: Create a new run
+      operationId: createRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task]
+              properties:
+                task:
+                  type: string
+                  maxLength: 4000
+                model:
+                  type: string
+                  maxLength: 200
+                metadata:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "201":
+          description: Run created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id, status]
+                properties:
+                  run_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [running]
+        "400":
+          description: Invalid payload
+        "401":
+          description: Missing or invalid API key
+        "429":
+          description: Rate limit exceeded
+  /api/v1/runs/{run_id}:
+    patch:
+      tags: [runs]
+      summary: Update a run (complete or fail it)
+      operationId: updateRun
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [completed, failed]
+                final_output:
+                  type: string
+                  maxLength: 200000
+                error_message:
+                  type: string
+                  maxLength: 20000
+      responses:
+        "200":
+          description: Run updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        "400":
+          description: Invalid payload
+        "401":
+          description: Missing or invalid API key
+        "404":
+          description: Run not found
+  /api/v1/runs/{run_id}/steps:
+    post:
+      tags: [steps]
+      summary: Report a step for a run (creates or updates by id)
+      operationId: reportStep
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [step_number, type]
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                step_number:
+                  type: integer
+                  minimum: 1
+                  maximum: 10000
+                type:
+                  type: string
+                  maxLength: 50
+                status:
+                  type: string
+                  enum: [running, success, error]
+                tool_name:
+                  type: string
+                  maxLength: 100
+                input:
+                  type: string
+                output:
+                  type: string
+                error_message:
+                  type: string
+                  maxLength: 20000
+                latency_ms:
+                  type: integer
+                  minimum: 0
+                tokens_used:
+                  type: integer
+                  minimum: 0
+                created_at:
+                  type: string
+                  format: date-time
+      responses:
+        "201":
+          description: Step created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  id:
+                    type: string
+                    format: uuid
+        "400":
+          description: Invalid payload
+        "401":
+          description: Missing or invalid API key
+        "404":
+          description: Run not found
+        "429":
+          description: Rate limit exceeded
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: API key created in AgentBoard Settings (ab_live_...)

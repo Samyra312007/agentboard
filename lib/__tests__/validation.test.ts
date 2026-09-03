@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   parsePagination,
+  validateApiKeyName,
   validateCreateRun,
+  validateIngestRun,
+  validateIngestStep,
   validateMaxSteps,
   validateModel,
   validateRunId,
@@ -83,6 +86,99 @@ describe("validateCreateRun", () => {
     expect(validateCreateRun({ task: "", model: "gpt-4o", maxSteps: 5 }).ok).toBe(false);
     expect(validateCreateRun({ task: "x", model: "bogus", maxSteps: 5 }).ok).toBe(false);
     expect(validateCreateRun({ task: "x", maxSteps: 100 }).ok).toBe(false);
+  });
+});
+
+describe("validateApiKeyName", () => {
+  it("accepts trimmed names within the limit", () => {
+    expect(validateApiKeyName("  Production agent ")).toEqual({
+      ok: true,
+      value: "Production agent",
+    });
+  });
+
+  it("rejects empty and oversized names", () => {
+    expect(validateApiKeyName("").ok).toBe(false);
+    expect(validateApiKeyName("   ").ok).toBe(false);
+    expect(validateApiKeyName("x".repeat(51)).ok).toBe(false);
+    expect(validateApiKeyName(42).ok).toBe(false);
+  });
+});
+
+describe("validateIngestRun", () => {
+  it("accepts a minimal payload with defaults", () => {
+    expect(validateIngestRun({ task: "Do a thing" })).toEqual({
+      ok: true,
+      value: { task: "Do a thing", model: "unknown", metadata: null },
+    });
+  });
+
+  it("accepts explicit model and metadata", () => {
+    const result = validateIngestRun({
+      task: "x",
+      model: "my-custom-model",
+      metadata: { env: "prod" },
+    });
+    expect(result).toEqual({
+      ok: true,
+      value: { task: "x", model: "my-custom-model", metadata: { env: "prod" } },
+    });
+  });
+
+  it("rejects invalid payloads", () => {
+    expect(validateIngestRun(null).ok).toBe(false);
+    expect(validateIngestRun({}).ok).toBe(false);
+    expect(validateIngestRun({ task: "" }).ok).toBe(false);
+  });
+});
+
+describe("validateIngestStep", () => {
+  it("accepts a minimal step", () => {
+    const result = validateIngestStep({ step_number: 1, type: "llm_call" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.value).toMatchObject({
+      step_number: 1,
+      type: "llm_call",
+      status: "running",
+      latency_ms: null,
+      tokens_used: null,
+      created_at: null,
+    });
+  });
+
+  it("accepts a full step with all fields", () => {
+    const result = validateIngestStep({
+      id: "123e4567-e89b-12d3-a456-426614174000",
+      step_number: 3,
+      type: "tool_call",
+      status: "success",
+      tool_name: "web_search",
+      input: "{}",
+      output: "{}",
+      latency_ms: 120,
+      tokens_used: 42,
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.value).toMatchObject({
+      id: "123e4567-e89b-12d3-a456-426614174000",
+      status: "success",
+      latency_ms: 120,
+      tokens_used: 42,
+    });
+  });
+
+  it("rejects invalid steps", () => {
+    expect(validateIngestStep({}).ok).toBe(false);
+    expect(validateIngestStep({ step_number: 0, type: "x" }).ok).toBe(false);
+    expect(validateIngestStep({ step_number: 1.5, type: "x" }).ok).toBe(false);
+    expect(validateIngestStep({ step_number: 1, type: "" }).ok).toBe(false);
+    expect(validateIngestStep({ step_number: 1, type: "x", status: "bogus" }).ok).toBe(false);
+    expect(validateIngestStep({ step_number: 1, type: "x", latency_ms: -5 }).ok).toBe(false);
+    expect(validateIngestStep({ step_number: 1, type: "x", tokens_used: -1 }).ok).toBe(false);
+    expect(validateIngestStep({ step_number: 1, type: "x", created_at: "not-a-date" }).ok).toBe(false);
   });
 });
 

@@ -53,6 +53,12 @@ export function Header() {
           >
             History
           </Link>
+          <Link
+            href="/settings"
+            className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Settings
+          </Link>
           {user && (
             <div className="flex items-center gap-3 border-l border-border pl-6">
               <span className="text-sm text-muted-foreground max-w-[160px] truncate">

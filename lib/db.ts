@@ -123,17 +123,12 @@ export async function deleteRun(id: string, userId: string): Promise<void> {
 
 // Step functions
 export async function createStep(
-  step: Omit<Step, "status" | "output" | "latency_ms" | "tokens_used" | "completed_at" | "error_message">
+  step: Omit<Step, "status"> & { status?: Step["status"] }
 ): Promise<Step> {
   const supabase = getSupabase();
   const newStep: Step = {
     ...step,
-    status: "running",
-    output: null,
-    latency_ms: null,
-    tokens_used: null,
-    completed_at: null,
-    error_message: null,
+    status: step.status ?? "running",
   };
 
   const { error } = await supabase.from("steps").insert(newStep);
