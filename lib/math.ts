@@ -27,17 +27,22 @@ type Token =
 function tokenize(input: string): Token[] {
   const tokens: Token[] = [];
   let i = 0;
-  const source = input.replace(/\s+/g, "");
 
-  while (i < source.length) {
-    const char = source[i];
+  while (i < input.length) {
+    const char = input[i];
+
+    // Skip whitespace between tokens without merging adjacent numbers.
+    if (char === " " || char === "\t" || char === "\n") {
+      i++;
+      continue;
+    }
 
     if (char >= "0" && char <= "9") {
       let j = i;
-      while (j < source.length && (source[j] >= "0" && source[j] <= "9" || source[j] === ".")) {
+      while (j < input.length && (input[j] >= "0" && input[j] <= "9" || input[j] === ".")) {
         j++;
       }
-      const raw = source.slice(i, j);
+      const raw = input.slice(i, j);
       // Reject malformed numbers like "1.2.3"
       if ((raw.match(/\./g) || []).length > 1) {
         throw new ExpressionError(`Invalid number: ${raw}`);
@@ -95,14 +100,6 @@ export function evaluateExpression(input: string): number {
     return token.value;
   };
 
-  const expectOperator = (value: string): void => {
-    const token = peek();
-    if (!token || token.kind !== "operator" || token.value !== value) {
-      throw new ExpressionError(`Expected operator "${value}"`);
-    }
-    pos++;
-  };
-
   // expression := term (('+' | '-') term)*
   const parseExpression = (): number => {
     let left = parseTerm();
@@ -150,7 +147,11 @@ export function evaluateExpression(input: string): number {
     if (token && token.kind === "lparen") {
       pos++;
       const value = parseExpression();
-      expectOperator(")");
+      const closing = peek();
+      if (!closing || closing.kind !== "rparen") {
+        throw new ExpressionError('Expected operator ")"');
+      }
+      pos++;
       return value;
     }
     const base = expectNumber();

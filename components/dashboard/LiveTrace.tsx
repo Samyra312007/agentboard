@@ -24,12 +24,8 @@ export function LiveTrace({ runId, onComplete, viewFullRun }: LiveTraceProps) {
     onCompleteRef.current = onComplete;
   }, [onComplete]);
 
-  useEffect(() => {
-    // Reset state for new runId
-    setSteps([]);
-    setSummary(null);
-    setIsComplete(false);
-  }, [runId]);
+  // NOTE: consumers should render <LiveTrace key={runId} ... /> so state
+  // resets naturally on runId changes (remount) instead of via effect.
 
   useEffect(() => {
     if (isComplete || !runId) return;
@@ -43,8 +39,8 @@ export function LiveTrace({ runId, onComplete, viewFullRun }: LiveTraceProps) {
     const eventSource = new EventSource(`/api/agent/stream?run_id=${runId}`);
     eventSourceRef.current = eventSource;
 
-    const handleStep = (event: MessageEvent) => {
-      const step = JSON.parse(event.data) as Step;
+    const handleStep = (event: Event) => {
+      const step = JSON.parse((event as MessageEvent).data) as Step;
       setSteps((prev) => {
         const existingIndex = prev.findIndex((s) => s.id === step.id);
         if (existingIndex >= 0) {
@@ -56,8 +52,8 @@ export function LiveTrace({ runId, onComplete, viewFullRun }: LiveTraceProps) {
       });
     };
 
-    const handleComplete = (event: MessageEvent) => {
-      const runSummary = JSON.parse(event.data) as RunSummaryType;
+    const handleComplete = (event: Event) => {
+      const runSummary = JSON.parse((event as MessageEvent).data) as RunSummaryType;
       console.log("Stream complete received");
       setSummary(runSummary);
       setIsComplete(true);
@@ -76,9 +72,9 @@ export function LiveTrace({ runId, onComplete, viewFullRun }: LiveTraceProps) {
       eventSource.close();
     };
 
-    eventSource.addEventListener("step", handleStep as any);
-    eventSource.addEventListener("complete", handleComplete as any);
-    eventSource.addEventListener("error", handleError as any);
+    eventSource.addEventListener("step", handleStep);
+    eventSource.addEventListener("complete", handleComplete);
+    eventSource.addEventListener("error", handleError);
 
     return () => {
       console.log("Cleaning up stream");

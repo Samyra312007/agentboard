@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
         // Send completion event
         const summary: RunSummary = {
           run_id: run.id,
-          status: run.status as any,
+          status: run.status,
           total_steps: run.total_steps,
           total_tokens: run.total_tokens,
           total_latency_ms: run.total_latency_ms,

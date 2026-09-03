@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { v4 as uuidv4 } from "uuid";
-import type { Run, Step, Tool, SSEEvent, RunSummary } from "@/types";
+import type { Run, SSEEvent } from "@/types";
 import { tools, getToolByName } from "./tools";
 
 function getClientForModel(model: string): OpenAI {
@@ -35,6 +35,17 @@ export interface TraceEmitter {
   emit(event: SSEEvent): Promise<void> | void;
 }
 
+type ChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
+type ChatChunk = OpenAI.Chat.Completions.ChatCompletionChunk;
+
+/** A tool call accumulated across streaming deltas. */
+interface AccumulatedToolCall {
+  id: string;
+  type: "function";
+  index: number;
+  function: { name?: string; arguments: string };
+}
+
 export class AgentRunner {
   private run: Run;
   private stepNumber: number;
@@ -57,15 +68,15 @@ export class AgentRunner {
   async execute(): Promise<void> {
     try {
       // Robust detection of NVIDIA hosted models
-      const isNVIDIA = this.run.model.includes("minimax") || 
-                      this.run.model.includes("mistral") || 
+      const isNVIDIA = this.run.model.includes("minimax") ||
+                      this.run.model.includes("mistral") ||
                       this.run.model.includes("seed-oss");
       const isSeedOSS = this.run.model.includes("seed-oss");
 
       // Base system prompt
       const systemPrompt = `You are a helpful AI assistant. Use the provided tools to answer the user's request if needed. Provide a clear final answer once you have gathered all necessary information.`;
 
-      const messages: any[] = [];
+      const messages: ChatMessage[] = [];
 
       if (isNVIDIA) {
         // NVIDIA models strictly require prompt in 'user' role for many reasoning tasks
@@ -106,47 +117,61 @@ export class AgentRunner {
         try {
           let fullContent = "";
           let fullReasoning = "";
-          let toolCalls: any[] = [];
-          let finishReason = "stop";
+          const toolCalls: AccumulatedToolCall[] = [];
+          let finishReason: ChatChunk["choices"][number]["finish_reason"] = "stop";
 
           // Use the OpenAI client for all models for robust stream handling
-          const stream: any = await this.client.chat.completions.create({
+          const stream = await this.client.chat.completions.create({
             model: this.run.model,
-            messages: messages as any,
+            messages,
             stream: true,
             temperature: isSeedOSS ? 1.1 : (this.run.model.includes("mistral") ? 0.15 : 1),
             max_tokens: this.run.model.includes("mistral") ? 2048 : (isSeedOSS ? 8192 : 4096),
             // Tools are omitted for NVIDIA reasoning models for now to avoid complexity
-            tools: !isNVIDIA && tools.length > 0 ? tools.map(t => ({
+            tools: !isNVIDIA && tools.length > 0 ? tools.map((t) => ({
               type: "function",
               function: {
                 name: t.name,
                 description: t.description,
-                parameters: t.parameters as any,
+                parameters: t.parameters,
               },
             })) : undefined,
             tool_choice: !isNVIDIA ? "auto" : undefined,
-            // @ts-ignore - extra_body is supported by the SDK
-            extra_body: isSeedOSS ? { thinking_budget: -1 } : undefined,
-          } as any);
+            // NVIDIA Seed-OSS reasoning models accept thinking_budget as a top-level param
+            ...(isSeedOSS ? { thinking_budget: -1 } : {}),
+          } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
 
           for await (const chunk of stream) {
-            const delta = (chunk as any).choices[0]?.delta;
+            const choice = chunk.choices[0];
+            const delta = choice?.delta as
+              | (OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta & {
+                  reasoning_content?: string;
+                })
+              | undefined;
             if (!delta) continue;
-            
+
             if (delta.reasoning_content) fullReasoning += delta.reasoning_content;
             if (delta.content) fullContent += delta.content;
-            
+
             if (delta.tool_calls) {
               for (const tc of delta.tool_calls) {
-                if (!toolCalls[tc.index]) {
-                  toolCalls[tc.index] = { ...tc, function: { ...tc.function } };
+                const existing = toolCalls[tc.index];
+                if (!existing) {
+                  toolCalls[tc.index] = {
+                    id: tc.id ?? `call_${uuidv4()}`,
+                    type: "function",
+                    index: tc.index,
+                    function: {
+                      name: tc.function?.name,
+                      arguments: tc.function?.arguments ?? "",
+                    },
+                  };
                 } else {
-                  if (tc.function?.arguments) toolCalls[tc.index].function.arguments += tc.function.arguments;
+                  if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
                 }
               }
             }
-            if ((chunk as any).choices[0].finish_reason) finishReason = (chunk as any).choices[0].finish_reason;
+            if (choice?.finish_reason) finishReason = choice.finish_reason;
           }
 
           const llmLatency = Date.now() - llmStepStart;
@@ -167,10 +192,10 @@ export class AgentRunner {
               status: "success",
               tool_name: null,
               input: JSON.stringify({ messages_count: messages.length }),
-              output: JSON.stringify({ 
-                model: this.run.model, 
+              output: JSON.stringify({
+                model: this.run.model,
                 finish_reason: finishReason,
-                content: displayOutput
+                content: displayOutput,
               }),
               error_message: null,
               latency_ms: llmLatency,
@@ -180,16 +205,28 @@ export class AgentRunner {
             },
           });
 
-          const assistantMessage: any = { role: "assistant", content: fullContent };
-          if (toolCalls.length > 0) {
-            assistantMessage.tool_calls = toolCalls.filter(tc => tc.function?.name);
-          }
+          const completedToolCalls: OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall[] =
+            toolCalls
+              .filter((tc) => tc.function?.name)
+              .map((tc) => ({
+                id: tc.id,
+                type: "function" as const,
+                function: {
+                  name: tc.function!.name!,
+                  arguments: tc.function!.arguments ?? "",
+                },
+              }));
+
+          const assistantMessage: ChatMessage = {
+            role: "assistant",
+            content: fullContent,
+            ...(completedToolCalls.length > 0 ? { tool_calls: completedToolCalls } : {}),
+          };
           messages.push(assistantMessage);
 
-          if (toolCalls.length > 0 && assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
-            // ... (Tool calling logic remains the same)
-            // Note: Currently toolCalls will only be populated in non-NVIDIA path
-            for (const toolCall of assistantMessage.tool_calls) {
+          if (completedToolCalls.length > 0) {
+            // Tool calling is only populated in the non-NVIDIA path
+            for (const toolCall of completedToolCalls) {
               this.stepNumber++;
               const toolStepId = uuidv4();
               const toolStepStart = Date.now();
@@ -241,12 +278,12 @@ export class AgentRunner {
                 });
 
                 if (!result.success) this.failureCount++;
-                messages.push({ 
-                  role: "tool", 
-                  tool_call_id: toolCall.id, 
+                messages.push({
+                  role: "tool",
+                  tool_call_id: toolCall.id,
                   name: toolName,
-                  content: JSON.stringify(result.output) 
-                });
+                  content: JSON.stringify(result.output),
+                } as ChatMessage);
               } catch (error) {
                 this.failureCount++;
                 await this.emitter.emit({
@@ -267,12 +304,12 @@ export class AgentRunner {
                     completed_at: new Date().toISOString(),
                   },
                 });
-                messages.push({ 
-                  role: "tool", 
-                  tool_call_id: toolCall.id, 
+                messages.push({
+                  role: "tool",
+                  tool_call_id: toolCall.id,
                   name: toolName,
-                  content: JSON.stringify({ error: "Tool execution failed" }) 
-                });
+                  content: JSON.stringify({ error: "Tool execution failed" }),
+                } as ChatMessage);
               }
             }
           } else if (fullContent || fullReasoning) {

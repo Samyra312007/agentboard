@@ -1,6 +1,6 @@
 import { formatMs, formatTokens } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Check, X, Star, Loader2, ChevronRight } from "lucide-react";
+import { Check, X, Loader2, ChevronRight } from "lucide-react";
 import type { Step } from "@/types";
 
 interface StepCardProps {

@@ -1,21 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Header } from "@/components/dashboard/Header";
 import { RunForm } from "@/components/dashboard/RunForm";
 import { LiveTrace } from "@/components/dashboard/LiveTrace";
-import type { RunSummary } from "@/types";
 
 export default function Home() {
+  const router = useRouter();
   const [runId, setRunId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [currentRunSummary, setCurrentRunSummary] = useState<RunSummary | null>(null);
 
   const handleRunSubmit = async (data: { task: string; model: string; maxSteps: number }) => {
     try {
       setIsRunning(true);
       setRunId(null);
-      setCurrentRunSummary(null);
 
       const response = await fetch("/api/agent/run", {
         method: "POST",
@@ -36,14 +35,13 @@ export default function Home() {
     }
   };
 
-  const handleComplete = (summary: RunSummary) => {
-    setCurrentRunSummary(summary);
+  const handleComplete = () => {
     setIsRunning(false);
   };
 
   const handleViewFullRun = () => {
     if (runId) {
-      window.location.href = `/runs/${runId}`;
+      router.push(`/runs/${runId}`);
     }
   };
 
@@ -56,6 +54,7 @@ export default function Home() {
           {runId && (
             <div className="h-[600px] border border-border rounded-lg overflow-hidden">
               <LiveTrace
+                key={runId}
                 runId={runId}
                 onComplete={handleComplete}
                 viewFullRun={handleViewFullRun}

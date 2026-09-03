@@ -21,20 +21,20 @@ export default function RunDetailPage() {
   const [displaySteps, setDisplaySteps] = useState<Step[]>([]);
 
   useEffect(() => {
-    fetchRun();
-  }, [runId]);
-
-  const fetchRun = async () => {
-    try {
+    let cancelled = false;
+    (async () => {
       const response = await fetch(`/api/runs?id=${runId}`);
       if (!response.ok) throw new Error("Failed to fetch run");
       const data = await response.json();
-      setRun(data);
-      setDisplaySteps(data.steps);
-    } catch (error) {
-      console.error("Error fetching run:", error);
-    }
-  };
+      if (!cancelled) {
+        setRun(data);
+        setDisplaySteps(data.steps);
+      }
+    })().catch((error) => console.error("Error fetching run:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, [runId]);
 
   const handleReplay = () => {
     if (!run) return;
