@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Play } from "lucide-react";
+import { MODEL_REGISTRY } from "@/lib/models";
 
 interface RunFormProps {
   onSubmit: (data: { task: string; model: string; maxSteps: number }) => void;
@@ -51,10 +52,11 @@ export function RunForm({ onSubmit, isRunning }: RunFormProps) {
                 className="w-full p-2 bg-background border border-border rounded-md text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                 disabled={isRunning}
               >
-                <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
-                <option value="minimaxai/minimax-m2.7">minimax-m2.7 (NVIDIA)</option>
-                <option value="mistralai/mistral-large-3-675b-instruct-2512">Mistral Large 3 (NVIDIA)</option>
-                <option value="bytedance/seed-oss-36b-instruct">Seed OSS 36B (NVIDIA)</option>
+                {Object.values(MODEL_REGISTRY).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
               </select>
             </div>
 

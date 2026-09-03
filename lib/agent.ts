@@ -117,6 +117,8 @@ export class AgentRunner {
         try {
           let fullContent = "";
           let fullReasoning = "";
+          let promptTokens = 0;
+          let completionTokens = 0;
           const toolCalls: AccumulatedToolCall[] = [];
           let finishReason: ChatChunk["choices"][number]["finish_reason"] = "stop";
 
@@ -137,6 +139,7 @@ export class AgentRunner {
               },
             })) : undefined,
             tool_choice: !isNVIDIA ? "auto" : undefined,
+            stream_options: { include_usage: true },
             // NVIDIA Seed-OSS reasoning models accept thinking_budget as a top-level param
             ...(isSeedOSS ? { thinking_budget: -1 } : {}),
           } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
@@ -172,8 +175,17 @@ export class AgentRunner {
               }
             }
             if (choice?.finish_reason) finishReason = choice.finish_reason;
+
+            // Real token usage arrives on the final chunk when
+            // stream_options.include_usage is set.
+            if (chunk.usage) {
+              promptTokens = chunk.usage.prompt_tokens ?? promptTokens;
+              completionTokens = chunk.usage.completion_tokens ?? completionTokens;
+            }
           }
 
+          const llmTokens = promptTokens + completionTokens;
+          this.totalTokens += llmTokens;
           const llmLatency = Date.now() - llmStepStart;
           this.totalLatency += llmLatency;
 
@@ -199,7 +211,7 @@ export class AgentRunner {
               }),
               error_message: null,
               latency_ms: llmLatency,
-              tokens_used: 0,
+              tokens_used: llmTokens,
               created_at: new Date(llmStepStart).toISOString(),
               completed_at: new Date().toISOString(),
             },

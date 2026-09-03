@@ -131,6 +131,7 @@ npm run dev
 - `OPENAI_API_KEY`: OpenAI key (used for OpenAI models)
 - `GROQAPI_KEY`: Groq key (used for Groq models)
 - `MINIMAX_API_KEY` / `MISTRAL_API_KEY` / `BYTEDANCE_API_KEY`: NVIDIA-hosted model keys
+- `TAVILY_API_KEY`: Tavily web search key (optional — web search degrades gracefully without it)
 
 ## Architecture
 
@@ -180,12 +181,15 @@ npm run dev
 
 ## Available Tools
 
-The agent has access to 4 simulated tools:
+The agent has access to 5 tools — every tool hits a real API or fails gracefully:
 
-1. **web_search**: Searches for information about a topic (simulated results)
-2. **calculator**: Performs mathematical calculations
-3. **summarizer**: Summarizes long text into key points
-4. **weather**: Gets current weather information for a location (simulated)
+1. **web_search**: Web search via Tavily (set `TAVILY_API_KEY`; returns a
+   clear error result when the key is missing)
+2. **weather**: Live conditions via Open-Meteo (free, no API key)
+3. **http_fetch**: Fetch any HTTP(S) URL with SSRF protection (private/loopback
+   addresses blocked, 512KB body cap, 8s timeout)
+4. **calculator**: Safe local expression evaluation (no `eval`)
+5. **summarizer**: Deterministic local text summarization
 
 ## Usage
 
