@@ -1,4 +1,5 @@
 import type { Tool, ToolResult } from "@/types";
+import { evaluateExpression, ExpressionError } from "./math";
 
 // Simulated web search tool
 export const webSearch: Tool = {
@@ -69,9 +70,8 @@ export const calculator: Tool = {
     const expression = params.expression as string;
 
     try {
-      // Safe evaluation of mathematical expressions
-      const sanitized = expression.replace(/[^0-9+\-*/().\s]/g, '');
-      const result = Function(`"use strict"; return (${sanitized})`)();
+      // Safe evaluation via the expression parser (no eval/Function)
+      const result = evaluateExpression(expression);
 
       await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -81,10 +81,11 @@ export const calculator: Tool = {
         latency_ms: Date.now() - startTime,
       };
     } catch (error) {
+      const detail = error instanceof ExpressionError ? error.message : "Unknown error";
       return {
         success: false,
         output: null,
-        error: `Invalid expression: ${expression}`,
+        error: `Invalid expression: ${expression} (${detail})`,
         latency_ms: Date.now() - startTime,
       };
     }

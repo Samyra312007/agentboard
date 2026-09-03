@@ -1,8 +1,9 @@
-import { supabase } from "./supabase";
+import { getSupabase } from "./server/supabase";
 import type { Run, Step, RunWithSteps } from "@/types";
 
 // Run functions
 export async function createRun(run: Omit<Run, 'total_steps' | 'total_tokens' | 'total_latency_ms' | 'failure_count' | 'status'>): Promise<Run> {
+  const supabase = getSupabase();
   const newRun: Run = {
     ...run,
     total_steps: 0,
@@ -25,6 +26,7 @@ export async function createRun(run: Omit<Run, 'total_steps' | 'total_tokens' | 
 }
 
 export async function getRunById(id: string): Promise<Run | null> {
+  const supabase = getSupabase();
   const { data, error } = await supabase
     .from('runs')
     .select('*')
@@ -40,21 +42,38 @@ export async function getRunById(id: string): Promise<Run | null> {
   return data as Run;
 }
 
-export async function getAllRuns(): Promise<Run[]> {
-  const { data, error } = await supabase
+export interface GetRunsOptions {
+  limit?: number;
+  offset?: number;
+  status?: 'all' | 'completed' | 'failed' | 'running';
+}
+
+export async function getAllRuns(options: GetRunsOptions = {}): Promise<{ runs: Run[]; total: number }> {
+  const supabase = getSupabase();
+  const { limit = 50, offset = 0, status } = options;
+
+  let query = supabase
     .from('runs')
-    .select('*')
-    .order('created_at', { ascending: false });
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (status && status !== 'all') {
+    query = query.eq('status', status);
+  }
+
+  const { data, error, count } = await query;
 
   if (error) {
     console.error("Error fetching all runs from Supabase:", error);
     throw error;
   }
 
-  return data as Run[];
+  return { runs: data as Run[], total: count ?? (data as Run[]).length };
 }
 
 export async function updateRun(id: string, updates: Partial<Omit<Run, 'id'>>): Promise<void> {
+  const supabase = getSupabase();
   const { error } = await supabase
     .from('runs')
     .update(updates)
@@ -67,6 +86,7 @@ export async function updateRun(id: string, updates: Partial<Omit<Run, 'id'>>): 
 }
 
 export async function deleteRun(id: string): Promise<void> {
+  const supabase = getSupabase();
   const { error } = await supabase
     .from('runs')
     .delete()
@@ -80,6 +100,7 @@ export async function deleteRun(id: string): Promise<void> {
 
 // Step functions
 export async function createStep(step: Omit<Step, 'status' | 'output' | 'latency_ms' | 'tokens_used' | 'completed_at' | 'error_message'>): Promise<Step> {
+  const supabase = getSupabase();
   const newStep: Step = {
     ...step,
     status: 'running',
@@ -103,6 +124,7 @@ export async function createStep(step: Omit<Step, 'status' | 'output' | 'latency
 }
 
 export async function getStepsByRunId(run_id: string): Promise<Step[]> {
+  const supabase = getSupabase();
   const { data, error } = await supabase
     .from('steps')
     .select('*')
@@ -118,6 +140,7 @@ export async function getStepsByRunId(run_id: string): Promise<Step[]> {
 }
 
 export async function updateStep(id: string, updates: Partial<Omit<Step, 'id'>>): Promise<void> {
+  const supabase = getSupabase();
   const { error } = await supabase
     .from('steps')
     .update(updates)

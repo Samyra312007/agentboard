@@ -1,24 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import { createRun } from "@/lib/db";
-import type { CreateRunRequest } from "@/types";
+import { validateCreateRun } from "@/lib/validation";
+import { rateLimit, getClientIp } from "@/lib/rate-limit";
+
+// Abuse protection: max 10 agent runs per minute per client IP.
+const RUN_RATE_LIMIT = { max: 10, windowMs: 60_000 };
 
 export async function POST(request: NextRequest) {
+  let body: unknown;
   try {
-    const body: CreateRunRequest = await request.json();
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "Request body must be valid JSON" },
+      { status: 400 }
+    );
+  }
 
-    if (!body.task || typeof body.task !== "string") {
-      return NextResponse.json(
-        { error: "Invalid task: must be a non-empty string" },
-        { status: 400 }
-      );
-    }
+  const validation = validateCreateRun(body);
+  if (!validation.ok) {
+    return NextResponse.json({ error: validation.error }, { status: 400 });
+  }
 
+  const limiter = rateLimit(
+    `agent-run:${getClientIp(request)}`,
+    RUN_RATE_LIMIT.max,
+    RUN_RATE_LIMIT.windowMs
+  );
+  if (!limiter.allowed) {
+    return NextResponse.json(
+      { error: `Rate limit exceeded. Try again in ${limiter.retryAfterSeconds} seconds.` },
+      { status: 429, headers: { "Retry-After": String(limiter.retryAfterSeconds) } }
+    );
+  }
+
+  const { task, model, maxSteps } = validation.value;
+
+  try {
     const run = await createRun({
       id: uuidv4(),
-      task: body.task,
-      model: body.model || "llama-3.3-70b-versatile",
-      max_steps: body.maxSteps || 10,
+      task,
+      model,
+      max_steps: maxSteps,
       final_output: null,
       error_message: null,
       created_at: new Date().toISOString(),
