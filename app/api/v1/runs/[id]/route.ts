@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRunById, updateRun } from "@/lib/db";
 import { getBearerToken, verifyApiKey } from "@/lib/api-keys";
+import { runAlertEvaluation } from "@/lib/alerts";
 import { validateRunId } from "@/lib/validation";
 
 /**
@@ -55,6 +56,9 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     error_message: errorMessage,
     completed_at: new Date().toISOString(),
   });
+
+  // Evaluate alert rules in the background when a run completes/fails.
+  void runAlertEvaluation(userId, null);
 
   return NextResponse.json({ ok: true });
 }

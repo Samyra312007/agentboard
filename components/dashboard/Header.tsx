@@ -60,6 +60,12 @@ export function Header() {
             Analytics
           </Link>
           <Link
+            href="/alerts"
+            className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Alerts
+          </Link>
+          <Link
             href="/settings"
             className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
           >

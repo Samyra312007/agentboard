@@ -132,6 +132,8 @@ npm run dev
 - `GROQAPI_KEY`: Groq key (used for Groq models)
 - `MINIMAX_API_KEY` / `MISTRAL_API_KEY` / `BYTEDANCE_API_KEY`: NVIDIA-hosted model keys
 - `TAVILY_API_KEY`: Tavily web search key (optional — web search degrades gracefully without it)
+- `RESEND_API_KEY`: Resend key for email alerts (optional — email delivery is skipped without it)
+- `ALERT_EMAIL_FROM`: From address for alert emails (optional, defaults to `AgentBoard Alerts <onboarding@resend.dev>`)
 
 ## Architecture
 
@@ -265,6 +267,16 @@ agent-board/
 ├── tsconfig.json                  # TypeScript configuration
 └── package.json                  # Dependencies
 ```
+
+## Alerts
+
+Create rules on the **Alerts** page (failure rate, average latency, or cost
+over a rolling window). Rules are evaluated whenever a run finishes and fire
+at most once per window. Delivery channels:
+
+- **Webhook** — receives a `POST` with `{ event, message, sent_at }`
+- **Email** — requires `RESEND_API_KEY` (and a verified domain for production
+  sending; the sandbox default from-address works for testing)
 
 ## Public Ingestion API
 

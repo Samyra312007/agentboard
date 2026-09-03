@@ -11,7 +11,7 @@ import { createServerClient } from "@supabase/ssr";
  * API routes enforce auth themselves (they return JSON 401s instead of
  * redirects), so they are intentionally not matched here.
  */
-const PROTECTED_PATHS = ["/", "/runs", "/analytics", "/settings"];
+const PROTECTED_PATHS = ["/", "/runs", "/analytics", "/alerts", "/settings"];
 const AUTH_PATHS = ["/login", "/signup"];
 
 function isProtected(pathname: string): boolean {
@@ -72,6 +72,7 @@ export const config = {
     "/",
     "/runs/:path*",
     "/analytics/:path*",
+    "/alerts/:path*",
     "/settings/:path*",
     "/login",
     "/signup",

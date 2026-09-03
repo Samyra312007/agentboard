@@ -232,6 +232,118 @@ export function validateIngestStep(body: unknown): ValidationResult<IngestStepIn
   };
 }
 
+// ---------------------------------------------------------------------------
+// Alert rules (Phase 7)
+// ---------------------------------------------------------------------------
+
+export interface AlertChannelInput {
+  type: "email" | "webhook";
+  target: string;
+}
+
+export interface AlertRuleInput {
+  name: string;
+  metric: "failure_rate" | "avg_latency" | "cost";
+  operator: "gt" | "gte";
+  threshold: number;
+  window_minutes: number;
+  channels: AlertChannelInput[];
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function validateChannel(value: unknown): ValidationResult<AlertChannelInput> {
+  if (typeof value !== "object" || value === null) {
+    return { ok: false, error: "each channel must be an object" };
+  }
+  const record = value as Record<string, unknown>;
+  if (record.type !== "email" && record.type !== "webhook") {
+    return { ok: false, error: 'channel type must be "email" or "webhook"' };
+  }
+  const target = typeof record.target === "string" ? record.target.trim() : "";
+  if (target.length === 0) {
+    return { ok: false, error: "channel target must not be empty" };
+  }
+  if (record.type === "email") {
+    if (target.length > 200 || !EMAIL_RE.test(target)) {
+      return { ok: false, error: "email channel target must be a valid email address" };
+    }
+  } else {
+    if (target.length > 500) {
+      return { ok: false, error: "webhook URL must be at most 500 characters" };
+    }
+    try {
+      const url = new URL(target);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error("protocol");
+      }
+    } catch {
+      return { ok: false, error: "webhook target must be a valid http(s) URL" };
+    }
+  }
+  return { ok: true, value: { type: record.type, target } };
+}
+
+export function validateAlertRule(body: unknown): ValidationResult<AlertRuleInput> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Request body must be a JSON object" };
+  }
+  const record = body as Record<string, unknown>;
+
+  if (typeof record.name !== "string" || record.name.trim().length === 0) {
+    return { ok: false, error: "name must be a non-empty string" };
+  }
+  const name = record.name.trim().slice(0, 80);
+
+  const metric = record.metric;
+  if (metric !== "failure_rate" && metric !== "avg_latency" && metric !== "cost") {
+    return {
+      ok: false,
+      error: 'metric must be "failure_rate", "avg_latency" or "cost"',
+    };
+  }
+
+  const operator = record.operator;
+  if (operator !== "gt" && operator !== "gte") {
+    return { ok: false, error: 'operator must be "gt" or "gte"' };
+  }
+
+  const threshold = Number(record.threshold);
+  if (!Number.isFinite(threshold) || threshold < 0) {
+    return { ok: false, error: "threshold must be a non-negative number" };
+  }
+
+  const windowMinutes = Number(record.window_minutes ?? 60);
+  if (!Number.isInteger(windowMinutes) || windowMinutes < 1 || windowMinutes > 10_080) {
+    return { ok: false, error: "window_minutes must be an integer between 1 and 10080" };
+  }
+
+  if (!Array.isArray(record.channels) || record.channels.length === 0) {
+    return { ok: false, error: "channels must be a non-empty array" };
+  }
+  if (record.channels.length > 5) {
+    return { ok: false, error: "channels can have at most 5 entries" };
+  }
+  const channels: AlertChannelInput[] = [];
+  for (const raw of record.channels) {
+    const channel = validateChannel(raw);
+    if (!channel.ok) return channel;
+    channels.push(channel.value);
+  }
+
+  return {
+    ok: true,
+    value: {
+      name,
+      metric,
+      operator,
+      threshold,
+      window_minutes: windowMinutes,
+      channels,
+    },
+  };
+}
+
 export function parsePagination(params: URLSearchParams): PaginationInput {
   const rawLimit = Number(params.get("limit") ?? "50");
   const rawOffset = Number(params.get("offset") ?? "0");

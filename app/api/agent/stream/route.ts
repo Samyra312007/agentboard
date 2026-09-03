@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRunById, updateRun, createStep, updateStep, getStepsByRunId } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
+import { runAlertEvaluation } from "@/lib/alerts";
 import { AgentRunner, type TraceEmitter } from "@/lib/agent";
 import type { SSEEvent, RunSummary, Step, ErrorPayload } from "@/types";
 
@@ -108,6 +109,9 @@ export async function GET(request: NextRequest) {
               final_output: summary.final_output,
               completed_at: new Date().toISOString(),
             });
+
+            // Evaluate alert rules in the background after a run finishes.
+            void runAlertEvaluation(user.id, user.email ?? null);
           } else if (event.type === "error") {
             const errorPayload = event.data as ErrorPayload;
             await updateRun(runId, user.id, {
@@ -115,6 +119,9 @@ export async function GET(request: NextRequest) {
               error_message: errorPayload.error,
               completed_at: new Date().toISOString(),
             });
+
+            // Evaluate alert rules in the background after a run finishes.
+            void runAlertEvaluation(user.id, user.email ?? null);
           }
 
           const data = `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
