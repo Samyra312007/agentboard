@@ -1,11 +1,17 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getRunById, updateRun, createStep, updateStep, getStepsByRunId } from "@/lib/db";
+import { getSessionUser } from "@/lib/auth";
 import { AgentRunner, type TraceEmitter } from "@/lib/agent";
 import type { SSEEvent, RunSummary, Step, ErrorPayload } from "@/types";
 
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
   const runId = searchParams.get("run_id");
 
@@ -13,7 +19,8 @@ export async function GET(request: NextRequest) {
     return new Response("Missing run_id parameter", { status: 400 });
   }
 
-  const run = await getRunById(runId);
+  // Ownership check — getRunById is scoped to the session user.
+  const run = await getRunById(runId, user.id);
   if (!run) {
     return new Response("Run not found", { status: 404 });
   }
@@ -29,7 +36,7 @@ export async function GET(request: NextRequest) {
           const data = `event: step\ndata: ${JSON.stringify(step)}\n\n`;
           controller.enqueue(encoder.encode(data));
         }
-        
+
         // Send completion event
         const summary: RunSummary = {
           run_id: run.id,
@@ -43,7 +50,7 @@ export async function GET(request: NextRequest) {
         const completeData = `event: complete\ndata: ${JSON.stringify(summary)}\n\n`;
         controller.enqueue(encoder.encode(completeData));
         controller.close();
-      }
+      },
     });
     return new Response(stream, {
       headers: {
@@ -80,9 +87,9 @@ export async function GET(request: NextRequest) {
 
             // Update run totals
             if (step.status === "success" || step.status === "error") {
-              const currentRun = await getRunById(runId);
+              const currentRun = await getRunById(runId, user.id);
               if (currentRun) {
-                await updateRun(runId, {
+                await updateRun(runId, user.id, {
                   total_steps: currentRun.total_steps + 1,
                   total_tokens: currentRun.total_tokens + (step.tokens_used || 0),
                   total_latency_ms: currentRun.total_latency_ms + (step.latency_ms || 0),
@@ -92,7 +99,7 @@ export async function GET(request: NextRequest) {
             }
           } else if (event.type === "complete") {
             const summary = event.data as RunSummary;
-            await updateRun(runId, {
+            await updateRun(runId, user.id, {
               status: summary.status,
               total_steps: summary.total_steps,
               total_tokens: summary.total_tokens,
@@ -103,7 +110,7 @@ export async function GET(request: NextRequest) {
             });
           } else if (event.type === "error") {
             const errorPayload = event.data as ErrorPayload;
-            await updateRun(runId, {
+            await updateRun(runId, user.id, {
               status: "failed",
               error_message: errorPayload.error,
               completed_at: new Date().toISOString(),
@@ -117,7 +124,7 @@ export async function GET(request: NextRequest) {
 
       // Update run status to running if it's not already
       if (run.status !== "running") {
-        await updateRun(runId, { status: "running" });
+        await updateRun(runId, user.id, { status: "running" });
       }
 
       try {
@@ -129,7 +136,7 @@ export async function GET(request: NextRequest) {
         controller.close();
       } catch (error) {
         console.error("Error in stream:", error);
-        await updateRun(runId, {
+        await updateRun(runId, user.id, {
           status: "failed",
           error_message: error instanceof Error ? error.message : "Unknown error",
           completed_at: new Date().toISOString(),

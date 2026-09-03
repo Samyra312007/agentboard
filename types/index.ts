@@ -4,6 +4,7 @@ export type StepType = 'llm_call' | 'tool_call' | 'final_answer';
 
 export interface Run {
   id: string;
+  user_id: string | null;
   task: string;
   model: string;
   max_steps: number;

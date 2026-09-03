@@ -69,10 +69,9 @@ SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 
 ### Database Setup
 
-Run the following SQL in your Supabase SQL Editor to create the necessary tables:
+Create the base tables with this SQL in your Supabase SQL Editor:
 
 ```sql
--- Create runs table
 CREATE TABLE runs (
   id UUID PRIMARY KEY,
   task TEXT NOT NULL,
@@ -89,7 +88,6 @@ CREATE TABLE runs (
   completed_at TIMESTAMPTZ
 );
 
--- Create steps table
 CREATE TABLE steps (
   id UUID PRIMARY KEY,
   run_id UUID REFERENCES runs(id) ON DELETE CASCADE,
@@ -105,22 +103,34 @@ CREATE TABLE steps (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   completed_at TIMESTAMPTZ
 );
-
--- Enable RLS (Optional, but recommended)
-ALTER TABLE runs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE steps ENABLE ROW LEVEL SECURITY;
-
--- Simple policy to allow all access for now (Adjust for production)
-CREATE POLICY "Allow all access" ON runs FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all access" ON steps FOR ALL USING (true) WITH CHECK (true);
 ```
+
+Then apply the auth/tenant-isolation migration (adds `user_id`, RLS policies,
+and indexes) from `supabase/migrations/0001_auth_tenant_isolation.sql`.
+
+### Authentication
+
+AgentBoard uses Supabase Auth (email/password or magic link). In the Supabase
+dashboard: **Authentication → Providers** and enable Email (both password and
+magic link). If you require email confirmation, add the site URL to
+**Authentication → URL Configuration** (e.g. `http://localhost:3000`).
 
 5. Run the development server:
 ```bash
 npm run dev
 ```
 
-6. Open [http://localhost:3000](http://localhost:3000) in your browser
+6. Open [http://localhost:3000](http://localhost:3000) in your browser and
+   create an account — every run is scoped to your user.
+
+## Environment Variables
+
+- `NEXT_PUBLIC_SUPABASE_URL`: Supabase Project URL
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase Anon (publishable) Key
+- `SUPABASE_SERVICE_ROLE_KEY`: Supabase Service Role Key (server-only)
+- `OPENAI_API_KEY`: OpenAI key (used for OpenAI models)
+- `GROQAPI_KEY`: Groq key (used for Groq models)
+- `MINIMAX_API_KEY` / `MISTRAL_API_KEY` / `BYTEDANCE_API_KEY`: NVIDIA-hosted model keys
 
 ## Architecture
 
@@ -251,13 +261,6 @@ agent-board/
 ├── tsconfig.json                  # TypeScript configuration
 └── package.json                  # Dependencies
 ```
-
-## Environment Variables
-
-- `OPENAI_API_KEY`: Your OpenAI API key (required)
-- `NEXT_PUBLIC_SUPABASE_URL`: Supabase Project URL
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase Anon Key
-- `SUPABASE_SERVICE_ROLE_KEY`: Supabase Service Role Key
 
 ## Development
 
