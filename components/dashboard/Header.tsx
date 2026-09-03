@@ -54,6 +54,12 @@ export function Header() {
             History
           </Link>
           <Link
+            href="/analytics"
+            className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Analytics
+          </Link>
+          <Link
             href="/settings"
             className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
           >

@@ -175,6 +175,26 @@ export async function updateStep(id: string, updates: Partial<Omit<Step, "id">>)
   }
 }
 
+/**
+ * Fetches every run for a user, oldest first. Used by analytics and CSV
+ * export where pagination would complicate aggregation.
+ */
+export async function getAllUserRuns(userId: string): Promise<Run[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("runs")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("Error fetching all runs from Supabase:", error);
+    throw error;
+  }
+
+  return (data as Run[]) ?? [];
+}
+
 export async function getRunWithSteps(id: string, userId: string): Promise<RunWithSteps | null> {
   const run = await getRunById(id, userId);
   if (!run) return null;

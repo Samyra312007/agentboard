@@ -103,3 +103,15 @@ export function estimateCost(modelId: string, promptTokens: number, completionTo
     (completionTokens / 1_000_000) * model.costPer1MCompletion
   );
 }
+
+/**
+ * Estimated cost from a combined token count (runs only store totals),
+ * using the average of prompt and completion pricing. Estimates only —
+ * exact split would require per-run prompt/completion columns.
+ */
+export function estimateCostBlended(modelId: string, totalTokens: number): number {
+  const model = getModel(modelId);
+  if (!model) return 0;
+  const blended = (model.costPer1MPrompt + model.costPer1MCompletion) / 2;
+  return (totalTokens / 1_000_000) * blended;
+}
